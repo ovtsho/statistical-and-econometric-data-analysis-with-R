@@ -1,0 +1,1114 @@
+Statistical and econometric data analysis with R
+================
+
+# Do more frequent medical consultations promote better well-being?
+
+- This project aims to investigate whether more annual visits among
+  older people relate to better well-being and health.
+
+- Project was prepared as a project for university classes of Data
+  Visualization techniques.
+
+- The study is based on data from the seventh wave of the Panel Study of
+  Health, Population Aging and Retirement Processes “SHARE: 50+ in
+  Europe and covers Poland, Sweden and Slovakia.
+
+- As a result of a series of statistical tests and econometric modeling,
+  it turns out that the number of medical consultations is a
+  statistically significant factor in the well-being of people aged 50+,
+  but only for Poland and Sweden.
+
+- Moreover, the relationship between this indicator and health status is
+  inverted: a higher number of visits does not at all whole promote
+  better well-being. This confirms the existence of non-objective health
+  reasons for the high number of annual visits among the elderly.
+
+#### Methodology
+
+- In 2018, according to an OECD report, the average number of medical
+  consultations per person was 6.7 visits in the European Union. In
+  Poland, this figure was slightly higher at 7.6 visits. Slovakia had
+  the highest average number of visits, and Sweden the lowest. Hence the
+  choice of countries for the analysis: so it was decided to study how
+  better well-being is affected by frequent, average and infrequent
+  visits to the doctor
+
+- The determinant of well-being was chosen to be the maxgrid variable,
+  which represents handshake strength. This measure is used to assess
+  muscle strength primarily among the elderly. Numerous studies indicate
+  that handshake strength is a biomarker of health not only physical,
+  but also mental, and overall well-being, as it is correlated with the
+  state of the muscular, circulatory, digestive, skeletal, nervous
+  systems of the broader quality of life
+
+- The SHARE survey includes people aged 50+ and, in addition, also
+  collects information on the partners of the subjects, so the study
+  sample was limited to people over 50 only. In addition, in order to
+  avoid presenting outlier-distorted results, observations in which the
+  explanatory variable, handshake strength index, and frequency of
+  visits to the doctor exceed 1.5 quartile divergence lengths were
+  removed from the sample. In addition, observations for which these
+  variables were coded as negative (implying missing data) were removed.
+  The same was done for all control variables that entered the
+  regression model
+
+- The significance of differences between Poland, Sweden and Slovakia in
+  terms of the frequency of medical consultations and levels of
+  well-being was tested using a weighted one-way ANOVA and the
+  non-parametric Kruskal-Wallis test.
+
+- Additionally, weighted Student’s t-tests were conducted to determine
+  which countries in particular differ significantly.
+
+- To test the fulfillment of the assumptions of ANOVA analysis, the
+  Levene test for homogeneity of variance was conducted, and the
+  normality of the distribution of variables was checked using the
+  Kolmogorov-Smirnov test.
+
+- The relationship between well-being and frequent visits to each study
+  country was additionally tested using the chi-square test, and its
+  strength was measured by the V-Cramer coefficient.
+
+- To enable the chi-square test of concordance, the continuous study
+  variables were aggregated into categorical variables.
+
+- The determinants of handshake strength, along with the average number
+  of visits to the doctor, were determined by constructing three
+  multivariate linear regressions for Poland, Sweden and Slovakia.
+
+- All descriptive statistics and statistical tests were calculated on
+  the entire population by using appropriate weights.
+
+- All decisions regarding the absence of reasons to reject or reject the
+  null hypotheses are made at the 0.05 significance level.
+
+## Set up
+
+Activate all packages (previously they could be installed with
+install.packages(’’)).
+
+``` r
+library(foreign)
+library(ggplot2)
+library(sjstats)
+library(Hmisc)
+library(dplyr)
+library(plyr)
+library(GGally, quietly = TRUE)
+library(DescTools)
+library(car)
+library(poliscidata)
+library(stargazer)
+```
+
+## Data preparation
+
+``` r
+# Clean environment 
+rm(list=ls())
+```
+
+``` r
+# Set working directory and load data 
+
+SHARE.w7 <- dplyr::filter(easySHARE_rel7_0_0, wave==7)
+SHARE.weights <- read.dta("sharew7_rel7-0-0_gv_weights.dta")
+SHARE.weights <- dplyr::select(SHARE.weights, mergeid, cciw_w7)
+SHARE <- dplyr::left_join(SHARE.w7, SHARE.weights, by="mergeid")
+attach(SHARE) 
+rm(easySHARE_rel7_0_0, SHARE.w7, SHARE.weights)
+SHARE$country.lab <- substr(mergeid,1,2)
+
+SHARE$hc002_mod[SHARE$hc002_mod < 0] <- NA
+SHARE$maxgrip[SHARE$maxgrip < 0] <- NA
+
+SHARE.PL <- dplyr::filter(SHARE, age >= 50 & country.lab=="PL" & !is.na(cciw_w7))
+SHARE.SE <- dplyr::filter(SHARE, age >= 50 & country.lab=="SE" & !is.na(cciw_w7))
+SHARE.SK <- dplyr::filter(SHARE, age >= 50 &country.lab=="SK" & !is.na(cciw_w7))
+
+SHARE <- dplyr::filter(SHARE, age >= 50 & country.lab %in% c("PL", "SE", "SK") & !is.na(cciw_w7))
+
+SHARE$country.lab <- as.factor(SHARE$country.lab)
+levels(SHARE$country.lab)[levels(SHARE$country.lab)=='PL'] <- 'Poland'
+levels(SHARE$country.lab)[levels(SHARE$country.lab)=='SE'] <- 'Sweden'
+levels(SHARE$country.lab)[levels(SHARE$country.lab)=='SK'] <- 'Slovakia'
+```
+
+## Basic descriptive statisitcs for samples
+
+- The largest group of respondents among the three selected countries is
+  Poland, with more than 4,000 respondents, and the smallest is
+  Slovakia, with 2,000.
+
+- The gender structure in the sample of the three countries maintains
+  the standard split between a larger female group (52%-55%) and a
+  smaller male group (45-47.5%).
+
+- Respondents from Sweden (72.15) have the highest average age (shown in
+  figure with a red dot) among the sample, and the youngest on average
+  are respondents from Slovakia (62.54). Respondents from Poland were on
+  average 66 years old.
+
+- From the graph of the sample’s age structure, it can be inferred that
+  Sweden’s sample is older on average, as it includes more people aged
+  70+ and has the highest median age among the three groups.
+
+- It is interesting to note that Slovakia, with the highest average
+  frequency of visits to the doctor (according to OECD data), is the
+  youngest sample, dominated by people under 70.
+
+``` r
+SHARE.m<-ddply(SHARE, .(country.lab), summarize, 
+              mean=round(mean(age, na.rm=TRUE), 2))
+ggplot(SHARE, aes(x=country.lab, y=age, fill=country.lab))+
+  geom_violin()+
+  geom_boxplot(width=0.3, alpha=0.2, outlier.shape = NA)+
+  geom_point(data=SHARE.m, aes(x=country.lab, y=mean, color='red', size=4))+
+  theme_bw()+
+  labs(title = "Sample age structure")+
+  ylab("Age")+
+  theme(legend.position = "none", 
+        axis.title.x=element_blank(),
+        text = element_text(size = 16))+
+  scale_fill_brewer(palette="PuBuGn")
+```
+
+![](statistical_project-_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
+
+``` r
+SHARE$female <- as.factor(SHARE$female)
+levels(SHARE$female)[levels(SHARE$female)==1] <- 'Female'
+levels(SHARE$female)[levels(SHARE$female)==0] <- 'Male'
+
+group.colors <- c(Female = "#FB8281", Male = "#A4DDEE")
+
+options(scipen=999) 
+ggplot(SHARE, aes(x=country.lab, fill=female))+
+  geom_bar(width = 0.7)+
+  theme_bw()+ylab('Sample size')+
+  labs(fill='Sex',title = "Sample size by gender structure")+
+  geom_text(aes(by=country.lab), stat="prop",  position = position_stack(vjust = .5), size=5)+
+  theme(axis.title.x=element_blank(),
+        legend.position = c(.8, .85),
+        text = element_text(size = 16))+ 
+  scale_fill_manual(values=group.colors)
+```
+
+![](statistical_project-_files/figure-gfm/unnamed-chunk-5-2.png)<!-- -->
+
+## Analysis outcomes
+
+- Data from the seventh wave of the SHARE survey shows that respondents
+  from Poland had the highest average number of medical consultations,
+  with almost 6 visits per year, but this value is quite variable, as
+  the number of annual visits deviated from the average by almost 5
+  visits on average.
+
+- All three selected countries have fairly wide confidence intervals for
+  the weighted average number of visits to a doctor.
+
+- Sweden had the lowest number of visits, with an average of 3.5, and in
+  the middle is Slovakia with an average of 4.5
+
+``` r
+#Remove outliners with weights
+Q1 <- wtd.quantile(SHARE$hc002_mod, .25, na.rm=TRUE, weight=SHARE$cciw_w7)
+Q3 <- wtd.quantile(SHARE$hc002_mod, .75, na.rm=TRUE, weight=SHARE$cciw_w7)
+IQR <- IQRw(SHARE$hc002_mod, na.rm=TRUE, weight=SHARE$cciw_w7)
+SHARE_out <- subset(SHARE, SHARE$hc002_mod > (Q1 - 1.5*IQR) & SHARE$hc002_mod < (Q3 + 1.5*IQR))
+```
+
+``` r
+data1 <- ddply(SHARE_out, .(country.lab), summarize, 
+      wgt.ave = weighted.mean(hc002_mod, cciw_w7, na.rm=TRUE), 
+      weighted_var = wtd.var(hc002_mod, cciw_w7, na.rm=TRUE),
+      sd=sqrt(weighted_var))
+
+ggplot(data1, aes(country.lab, wgt.ave, fill=country.lab)) + 
+  geom_bar(stat="identity", width = 0.7)+scale_fill_brewer(palette="PuBuGn")+
+  geom_errorbar(aes(x=country.lab, ymin= wgt.ave-sd, ymax=wgt.ave+sd), width=0.4, colour="orange", alpha=0.9, size=1.3,)+
+  theme_bw()+
+  labs(fill='', title='Weighted average number of medical consultations', subtitle='per year with confidence interval')+
+  ylab('Average number of medical consultations')+
+  theme(legend.position="", 
+        axis.title.x=element_blank(),
+        text = element_text(size = 16))
+```
+
+![](statistical_project-_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
+
+- For a more accurate comparison of the frequency of medical
+  consultations among the countries studied, this variable was
+  aggregated to short ranges.
+
+- People most often go for medical consultations up to 3 times a year in
+  Poland, Sweden and Slovakia.
+
+- It is noteworthy that a larger proportion of respondents from Sweden
+  and Slovakia are clustered in the 0-3 range, while a larger proportion
+  of respondents from Poland are scattered in the 0-3, 4-6,7-9 and 10-12
+  ranges, indicating on average a larger number of people who can be
+  classified as frequent attenders in Poland.
+
+``` r
+# Prepare categorical varibale 
+SHARE_out$hc002_mod_cat <- cut(SHARE_out$hc002_mod,
+                               breaks=c(0, 3, 6, 9, 12, 15, 20),include.lowest= TRUE, 
+                               labels=c('0-3', '4-6', '7-9', '10-12', '13-15', '16-20'))
+
+
+ggplot(data = SHARE_out, aes(x = hc002_mod_cat, fill=country.lab,  weight=cciw_w7)) +
+  geom_histogram(stat="count", position='dodge')+
+  scale_y_continuous(breaks=c(0, 2000000, 4000000), labels=c('0', '2 mln', '4 mln'))+
+  scale_fill_brewer(palette="PuBuGn")+theme_bw()+
+  geom_text(aes(by=country.lab), stat="prop", size = 3, vjust = -1,  position = position_dodge(1.2))+
+  labs(fill='Countries', title = 'Weighted average of the number of medical consultations', subtitle='per year')+
+  ylab('Population')+
+  xlab('Number of medical consultations')+
+  theme(panel.grid.major = element_blank(), 
+      panel.grid.minor = element_blank(),
+      legend.position = c(.82, .85), 
+      text = element_text(size = 14))
+```
+
+![](statistical_project-_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
+
+- As for handshake strength, which is taken as a measure of well-being
+  among people 50+ in this study, the Swedes have the highest average
+  strength (34.03) and the Slovaks the lowest (31.43), which is an
+  interesting observation since the Swedish population is more advanced
+  in age which would have to translate into lower average handshake
+  strength.
+
+- This phenomenon can be explained by the higher value of the average
+  health expectancy index for Sweden compared to Slovakia and Poland.
+
+``` r
+#Remove outliners for maxgrip variable 
+Q1 <- wtd.quantile(SHARE_out$maxgrip, .25, na.rm=TRUE, weight=SHARE_out$cciw_w7)
+Q3 <- wtd.quantile(SHARE_out$maxgrip, .75, na.rm=TRUE, weight=SHARE_out$cciw_w7)
+IQR <- IQRw(SHARE_out$maxgrip, na.rm=TRUE, weight=SHARE_out$cciw_w7)
+SHARE_out <- subset(SHARE_out, SHARE_out$maxgrip > (Q1 - 1.5*IQR) & SHARE_out$maxgrip < (Q3 + 1.5*IQR))
+
+
+SHARE_out.wm_grip<-ddply(SHARE_out, .(country.lab), summarize, 
+                wmean=round(wtd.mean(maxgrip , cciw_w7, na.rm=TRUE), 2))
+
+ggplot(SHARE_out, aes(x=country.lab, y=maxgrip, fill=country.lab))+
+  geom_violin(alpha=.9)+
+  geom_boxplot(width=0.3, alpha=0.2, outlier.shape = NA, aes(weight=cciw_w7))+ 
+  geom_point(data=SHARE_out.wm_grip, aes(x=country.lab, y=wmean, color='red', size=3.5))+
+  theme_bw()+
+  labs(title='Distribution of population handshake strength')+
+  ylab("Handshake power")+
+  theme(legend.position = "none", 
+        axis.title.x=element_blank(),
+        text = element_text(size = 16))+
+  scale_fill_brewer(palette="PuBuGn")
+```
+
+![](statistical_project-_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
+
+## Comparison of results between countries and specific groups
+
+- A weighted OneWayAnnova test, or one-way analysis of variance - a
+  statistical test used to compare means across multiple populations -
+  was chosen to examine differences in well-being (handshake strength)
+  between Poland, Sweden and Slovakia.
+
+- The null hypothesis of equality of means was rejected (p-value=0.00)
+  but the results of this test can be trusted provided the assumptions
+  of the test are met: similar variance in the studied groups and normal
+  distribution of the studied variables.
+
+- The homogeneity of the variance was checked using the Levene test,
+  which was not rejected at the 0.05 significance level (p-value= 0.79).
+
+- Normality of the distribution was checked with the Kolmogorov-Smirnov
+  test and was rejected at any significance level (p-value= 0.00).
+
+- Although, in this study we are dealing with a large sample (more than
+  9,000 observations), so the limiting distribution of the studied
+  variables converges to normal and the result of the One Way Annova
+  test should be reliable.
+
+- Nevertheless, since the assumptions of the analysis of variance were
+  broken, a non-parametric weighted Kruskal-Wallis Test was conducted to
+  test the equality of the means of the handshake strength variable
+  among the studied countries.
+
+- The null hypothesis of equal mean across the three groups, as with the
+  Annova test, was rejected at every level (p-value=0.00), i.e. there
+  are statistically significant differences in handshake strength among
+  the countries studied.
+
+- A weighted Student’s t-test was used separately for each pair of
+  countries to examine which specific countries differ. This test shows
+  that there are statistically significant differences in average
+  handshake strength among all the countries studied.
+
+``` r
+#   Are there statistically significant differences between the three countries in terms of well-being? 
+
+#  One Way ANOVA TEST
+res.aov <- aov(SHARE_out$maxgrip ~ SHARE_out$country.lab, weight=SHARE_out$cciw_w7)
+summary(res.aov)
+```
+
+    ##                         Df     Sum Sq  Mean Sq F value              Pr(>F)    
+    ## SHARE_out$country.lab    2   26680864 13340432   47.29 <0.0000000000000002 ***
+    ## Residuals             8671 2445940783   282083                                
+    ## ---
+    ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+
+``` r
+#As the p-value is less than the significance level 0.05, we can conclude 
+#that there are significant differences between the groups highlighted with “*" in the model summary
+
+# check anova assumptions 
+# eguality of variance
+leveneTest(SHARE_out$maxgrip ~ SHARE_out$country.lab, weight=SHARE_out$cciw_w7)
+```
+
+    ## Levene's Test for Homogeneity of Variance (center = median: SHARE_out$cciw_w7)
+    ##         Df F value Pr(>F)
+    ## group    2  0.2266 0.7973
+    ##       8671
+
+``` r
+#From the output above we can see that the p-value is not less than the significance level of 0.05. 
+#This means that there is no evidence to suggest that the variance across groups is statistically 
+#significantly different. Therefore, we can assume the homogeneity of variances in the different treatment groups.
+
+# check normality
+# Extract the residuals
+aov_residuals <- residuals(object = res.aov )
+# Run Kolmogorova Smirnov test
+ks.test(x = aov_residuals, y='pnorm' )
+```
+
+    ## 
+    ##  Asymptotic one-sample Kolmogorov-Smirnov test
+    ## 
+    ## data:  aov_residuals
+    ## D = 0.5031, p-value < 0.00000000000000022
+    ## alternative hypothesis: two-sided
+
+``` r
+plot(res.aov, 2)
+```
+
+![](statistical_project-_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
+
+``` r
+##we reject Ho 0 normality of distribution
+
+
+#assumption of normality doesn't met so   Kruskall Wallis test will be calculated 
+#this function despite being called man whitney counts K-W test for >2 gropes to compare
+weighted_mannwhitney( maxgrip ~ country.lab + cciw_w7, SHARE_out)
+```
+
+    ## 
+    ## # Weighted Kruskal-Wallis test
+    ## 
+    ##   comparison of maxgrip by country.lab
+    ##   Chisq=2.00  df=62  p-value=0.000
+
+``` r
+#Multiple pairwise-comparison between the means of groups
+TukeyHSD(res.aov)
+```
+
+    ##   Tukey multiple comparisons of means
+    ##     95% family-wise confidence level
+    ## 
+    ## Fit: aov(formula = SHARE_out$maxgrip ~ SHARE_out$country.lab, weight = SHARE_out$cciw_w7)
+    ## 
+    ## $`SHARE_out$country.lab`
+    ##                       diff       lwr         upr     p adj
+    ## Sweden-Poland    2.9853404  2.329746  3.64093440 0.0000000
+    ## Slovakia-Poland -0.7597033 -1.550432  0.03102539 0.0628197
+    ## Slovakia-Sweden -3.7450437 -4.582991 -2.90709678 0.0000000
+
+``` r
+### T TESTY for each group 
+# Sweden - Poland 
+weights::wtd.t.test(x=SHARE_out$maxgrip[SHARE_out$country.lab=="Poland"], 
+                    y=SHARE_out$maxgrip[SHARE_out$country.lab=="Sweden"], 
+                    weight=SHARE_out$cciw_w7[SHARE_out$country.lab=="Poland"],
+                    weighty=SHARE_out$cciw_w7[SHARE_out$country.lab=='Sweden'])
+```
+
+    ## $test
+    ## [1] "Two Sample Weighted T-Test (Welch)"
+    ## 
+    ## $coefficients
+    ##    t.value         df    p.value 
+    ##  -10.20753 5996.38688    0.00000 
+    ## 
+    ## $additional
+    ## Difference     Mean.x     Mean.y   Std. Err 
+    ## -2.9853404 33.2363100 36.2216504  0.2924645
+
+``` r
+#Slovakia - Poland
+weights::wtd.t.test(x=SHARE_out$maxgrip[SHARE_out$country.lab=="Slovakia"], 
+                    y=SHARE_out$maxgrip[SHARE_out$country.lab=="Poland"], 
+                    weight=SHARE_out$cciw_w7[SHARE_out$country.lab=="Slovakia"],
+                    weighty=SHARE_out$cciw_w7[SHARE_out$country.lab=='Poland'])
+```
+
+    ## $test
+    ## [1] "Two Sample Weighted T-Test (Welch)"
+    ## 
+    ## $coefficients
+    ##       t.value            df       p.value 
+    ##   -2.16367047 2882.64635525    0.03057155 
+    ## 
+    ## $additional
+    ## Difference     Mean.x     Mean.y   Std. Err 
+    ## -0.7597033 32.4766067 33.2363100  0.3511179
+
+``` r
+# Slovakia - Sweden
+weights::wtd.t.test(x=SHARE_out$maxgrip[SHARE_out$country.lab=="Slovakia"], 
+                    y=SHARE_out$maxgrip[SHARE_out$country.lab=="Sweden"], 
+                    weight=SHARE_out$cciw_w7[SHARE_out$country.lab=="Slovakia"],
+                    weighty=SHARE_out$cciw_w7[SHARE_out$country.lab=='Sweden'])
+```
+
+    ## $test
+    ## [1] "Two Sample Weighted T-Test (Welch)"
+    ## 
+    ## $coefficients
+    ##     t.value          df     p.value 
+    ##   -9.900649 3428.082506    0.000000 
+    ## 
+    ## $additional
+    ## Difference     Mean.x     Mean.y   Std. Err 
+    ## -3.7450437 32.4766067 36.2216504  0.3782624
+
+- The next stage of the analysis was to examine differences between the
+  frequency of medical consultations among the three countries studied.
+  The assumption of both normality of distribution of variables and
+  homogeneity of variance were not met, so only weighted Student’s
+  t-tests were conducted separately for each pair of countries.
+
+- The tests show that all groups of countries are statistically
+  significantly different from each other in terms of equality of the
+  average number of medical consultations per year.
+
+``` r
+# Are there statistically significant differences between the three countries in terms of the frequency of visits to the doctor? 
+
+
+res.aov <- aov(SHARE_out$hc002_mod ~ SHARE_out$country.lab, weight=SHARE_out$cciw_w7)
+
+summary(res.aov)
+```
+
+    ##                         Df    Sum Sq Mean Sq F value              Pr(>F)    
+    ## SHARE_out$country.lab    2  14155096 7077548   162.3 <0.0000000000000002 ***
+    ## Residuals             8671 378112587   43607                                
+    ## ---
+    ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+
+``` r
+leveneTest(SHARE_out$hc002_mod ~ SHARE_out$country.lab, weight=SHARE_out$cciw_w7)
+```
+
+    ## Levene's Test for Homogeneity of Variance (center = median: SHARE_out$cciw_w7)
+    ##         Df F value                Pr(>F)    
+    ## group    2  152.37 < 0.00000000000000022 ***
+    ##       8671                                  
+    ## ---
+    ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+
+``` r
+aov_residuals <- residuals(object = res.aov )
+ks.test(x = aov_residuals, y='pnorm' )
+```
+
+    ## 
+    ##  Asymptotic one-sample Kolmogorov-Smirnov test
+    ## 
+    ## data:  aov_residuals
+    ## D = 0.43012, p-value < 0.00000000000000022
+    ## alternative hypothesis: two-sided
+
+``` r
+plot(res.aov, 2)
+```
+
+![](statistical_project-_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
+
+``` r
+weighted_mannwhitney( maxgrip ~ country.lab + cciw_w7, SHARE_out)
+```
+
+    ## 
+    ## # Weighted Kruskal-Wallis test
+    ## 
+    ##   comparison of maxgrip by country.lab
+    ##   Chisq=2.00  df=62  p-value=0.000
+
+``` r
+TukeyHSD(res.aov)
+```
+
+    ##   Tukey multiple comparisons of means
+    ##     95% family-wise confidence level
+    ## 
+    ## Fit: aov(formula = SHARE_out$hc002_mod ~ SHARE_out$country.lab, weight = SHARE_out$cciw_w7)
+    ## 
+    ## $`SHARE_out$country.lab`
+    ##                       diff        lwr        upr     p adj
+    ## Sweden-Poland   -2.1647335 -2.4191644 -1.9103027 0.0000000
+    ## Slovakia-Poland -1.5277663 -1.8346418 -1.2208907 0.0000000
+    ## Slovakia-Sweden  0.6369673  0.3117667  0.9621678 0.0000133
+
+``` r
+plot(TukeyHSD(res.aov, conf.level = 0.99),las=1, col = "red")
+```
+
+![](statistical_project-_files/figure-gfm/unnamed-chunk-11-2.png)<!-- -->
+
+``` r
+## Here Annova's assumptions are not met so  T-Tests were performed 
+
+# Sweden - Poland 
+
+weights::wtd.t.test(x=SHARE_out$hc002_mod[SHARE_out$country.lab=="Poland"], 
+                    y=SHARE_out$hc002_mod[SHARE_out$country.lab=="Sweden"], 
+                    weight=SHARE_out$cciw_w7[SHARE_out$country.lab=="Poland"],
+                    weighty=SHARE_out$cciw_w7[SHARE_out$country.lab=='Sweden'])
+```
+
+    ## $test
+    ## [1] "Two Sample Weighted T-Test (Welch)"
+    ## 
+    ## $coefficients
+    ##    t.value         df    p.value 
+    ##   20.84156 6962.94900    0.00000 
+    ## 
+    ## $additional
+    ## Difference     Mean.x     Mean.y   Std. Err 
+    ##  2.1647335  5.5957209  3.4309874  0.1038662
+
+``` r
+#Slovakia - Poland
+weights::wtd.t.test(x=SHARE_out$hc002_mod[SHARE_out$country.lab=="Słowacja"], 
+                    y=SHARE_out$hc002_mod[SHARE_out$country.lab=="Poland"], 
+                    weight=SHARE_out$cciw_w7[SHARE_out$country.lab=="Słowacja"],
+                    weighty=SHARE_out$cciw_w7[SHARE_out$country.lab=='Poland'])
+```
+
+    ## $test
+    ## [1] "Two Sample Weighted T-Test (Welch)"
+    ## 
+    ## $coefficients
+    ## t.value      df p.value 
+    ##     NaN      NA      NA 
+    ## 
+    ## $additional
+    ## Difference     Mean.x     Mean.y   Std. Err 
+    ##        NaN        NaN   5.595721         NA
+
+``` r
+# Slovakia - Sweden
+weights::wtd.t.test(x=SHARE_out$hc002_mod[SHARE_out$country.lab=="Slovakia"], 
+                    y=SHARE_out$hc002_mod[SHARE_out$country.lab=="Sweden"], 
+                    weight=SHARE_out$cciw_w7[SHARE_out$country.lab=="Slovakia"],
+                    weighty=SHARE_out$cciw_w7[SHARE_out$country.lab=='Sweden'])
+```
+
+    ## $test
+    ## [1] "Two Sample Weighted T-Test (Welch)"
+    ## 
+    ## $coefficients
+    ##            t.value                 df            p.value 
+    ##    4.9519007246203 3024.2383804231417    0.0000007752441 
+    ## 
+    ## $additional
+    ## Difference     Mean.x     Mean.y   Std. Err 
+    ##  0.6369673  4.0679546  3.4309874  0.1286309
+
+- In addition, the relationship between the annual number of medical
+  consultations and handshake strength separately in Poland, Sweden and
+  Slovakia was examined using a Chi-square test of independence.
+
+- For this test, the variable maxgrid (handshake strength) and the
+  variable hc002_mod_cat (number of visits to a doctor) were aggregated
+  to intervals corresponding to the quantiles of the distributions of
+  these variables.
+
+- The assumption of this test about the minimum size of each group (5
+  observations) is satisfied.
+
+- The null hypothesis of this test is that there is no statistical
+  relationship between the variables under study. It was rejected for
+  each country (p-value=0.00), thus, there is a statistical relationship
+  between the number of medical consultations and handshake strength of
+  people aged 50+ in Poland, Sweden and Slovakia.
+
+- Albeit, these correlations are not strong, as Cramer’s V coefficient,
+  which is a measure of the strength of the relationship between the
+  variables, is close to zero for each country. The strongest dependence
+  of these variables among the countries studied can be seen in
+  Slovakia, where Cramer’s V coefficient was 0.17.
+
+``` r
+# Is well-being correlated with frequent doctor visits
+
+wtd.mean(SHARE_out$maxgrip, SHARE_out$cciw_w7, na.rm=TRUE)
+```
+
+    ## [1] 33.75677
+
+``` r
+wtd.quantile(SHARE_out$maxgrip, SHARE_out$cciw_w7, na.rm=TRUE)
+```
+
+    ##   0%  25%  50%  75% 100% 
+    ##    4   25   32   42   68
+
+``` r
+SHARE_out$maxgrip_cat <- cut(SHARE_out$maxgrip,
+                         breaks=c(4, 25, 32, 42, 68),include.lowest= TRUE, 
+                         labels=c( '4-24', '25-31', '32-41','42-68'))
+
+summary(SHARE_out$maxgrip_cat)
+```
+
+    ##  4-24 25-31 32-41 42-68 
+    ##  2388  2180  2087  2019
+
+``` r
+# Poland
+SHARE_out.PL <- dplyr::filter(SHARE_out,  country.lab=="Poland" )
+
+xtp.chi2(data=SHARE_out.PL, y=maxgrip_cat, x=hc002_mod_cat, w=cciw_w7)
+```
+
+    ##    Cell Contents 
+    ## |-------------------------|
+    ## |                   Count | 
+    ## |         Expected Values | 
+    ## |-------------------------|
+    ## 
+    ## ==========================================================================================
+    ##                hc002_mod_cat
+    ## maxgrip_cat          0-3        4-6        7-9      10-12      13-15      16-20      Total
+    ## ------------------------------------------------------------------------------------------
+    ## 4-24              890332    1021969     260987    1015387     178659     146058    3513392
+    ##                1412876.4   976407.9   210091.7   677508.4   127885.5   108622.1           
+    ## ------------------------------------------------------------------------------------------
+    ## 25-31            1163458     988277     199360     607789     102794      99387    3161065
+    ##                1271191.6   878492.6   189023.5   609567.0   115061.0    97729.4           
+    ## ------------------------------------------------------------------------------------------
+    ## 32-41            1339492     702399     150395     469681     107116     102023    2871106
+    ##                1154587.4   797910.0   171684.7   553652.5   104506.6    88764.8           
+    ## ------------------------------------------------------------------------------------------
+    ## 42-68            1617375     750110     134332     309874      64967      37752    2914410
+    ##                1172001.6   809944.6   174274.1   562003.1   106082.9    90103.6           
+    ## ------------------------------------------------------------------------------------------
+    ## Total            5010657    3462755     745074    2402731     453536     385220   12459973
+    ## ==========================================================================================
+    ## 
+    ## Statistics for All Table Factors
+    ## 
+    ## Pearson's Chi-squared test 
+    ## ------------------------------------------------------------
+    ## Chi^2 = 834787.1      d.f. = 15      p <0.0000000000000002 
+    ## 
+    ##         Minimum expected frequency: 88764.84
+
+``` r
+weighted_chisqtest(maxgrip_cat ~ hc002_mod_cat + cciw_w7, SHARE_out.PL)
+```
+
+    ## 
+    ## # Measure of Association for Contingency Tables
+    ## 
+    ##    Chi-squared: 834787.0999
+    ##     Cramer's V: 0.1494
+    ##             df: 15
+    ##        p-value: < .001***
+    ##   Observations: 1.246e+07
+
+``` r
+# Slovakia
+
+SHARE_out.SK <- dplyr::filter(SHARE_out,  country.lab=="Slovakia" )
+
+xtp.chi2(data=SHARE_out.SK, y=maxgrip_cat, x=hc002_mod_cat, w=cciw_w7)
+```
+
+    ##    Cell Contents 
+    ## |-------------------------|
+    ## |                   Count | 
+    ## |         Expected Values | 
+    ## |-------------------------|
+    ## 
+    ## ===================================================================================
+    ##                hc002_mod_cat
+    ## maxgrip_cat         0-3       4-6       7-9     10-12     13-15     16-20     Total
+    ## -----------------------------------------------------------------------------------
+    ## 4-24             209988    103761     50338     80718     17052     21053    482910
+    ##                287950.5   94604.5   32365.0   47269.7    9422.1   11298.3          
+    ## -----------------------------------------------------------------------------------
+    ## 25-31            222511     76787     20603     37549      2934      6851    367235
+    ##                218975.6   71943.2   24612.3   35946.8    7165.1    8591.9          
+    ## -----------------------------------------------------------------------------------
+    ## 32-41            233520     77672     12926     21603      4831      1607    352159
+    ##                209986.1   68989.7   23601.9   34471.1    6871.0    8239.2          
+    ## -----------------------------------------------------------------------------------
+    ## 42-68            244525     40934     18476      9604      4977      6216    324732
+    ##                193631.8   63616.6   21763.8   31786.4    6335.8    7597.5          
+    ## -----------------------------------------------------------------------------------
+    ## Total            910544    299154    102343    149474     29794     35727   1527036
+    ## ===================================================================================
+    ## 
+    ## Statistics for All Table Factors
+    ## 
+    ## Pearson's Chi-squared test 
+    ## ------------------------------------------------------------
+    ## Chi^2 = 131494.2      d.f. = 15      p <0.0000000000000002 
+    ## 
+    ##         Minimum expected frequency: 6335.846
+
+``` r
+weighted_chisqtest(maxgrip_cat ~ hc002_mod_cat + cciw_w7, SHARE_out.SK)
+```
+
+    ## 
+    ## # Measure of Association for Contingency Tables
+    ## 
+    ##    Chi-squared: 131494.1760
+    ##     Cramer's V: 0.1694
+    ##             df: 15
+    ##        p-value: < .001***
+    ##   Observations: 1.52704e+06
+
+``` r
+# Sweden 
+SHARE_out.SE <- dplyr::filter(SHARE_out,  country.lab=="Sweden" )
+
+xtp.chi2(data=SHARE_out.SE, y=maxgrip_cat, x=hc002_mod_cat, w=cciw_w7)
+```
+
+    ##    Cell Contents 
+    ## |-------------------------|
+    ## |                   Count | 
+    ## |         Expected Values | 
+    ## |-------------------------|
+    ## 
+    ## ====================================================================================
+    ##                hc002_mod_cat
+    ## maxgrip_cat         0-3        4-6       7-9     10-12     13-15     16-20     Total
+    ## ------------------------------------------------------------------------------------
+    ## 4-24             408325     171723     65410     92598     16976      7160    762192
+    ##                503151.0   138269.5   36911.0   63811.4   11542.1    8507.1          
+    ## ------------------------------------------------------------------------------------
+    ## 25-31            508725     155969     35511     55186      8820      9109    773320
+    ##                510497.0   140288.2   37449.9   64743.0   11710.6    8631.3          
+    ## ------------------------------------------------------------------------------------
+    ## 32-41            532674     140499     36078     60079     14115     14752    798197
+    ##                526919.2   144801.1   38654.6   66825.7   12087.3    8909.0          
+    ## ------------------------------------------------------------------------------------
+    ## 42-68            810607     152964     28818     78800     11940      7196   1090325
+    ##                719763.7   197796.2   52801.6   91282.9   16511.1   12169.5          
+    ## ------------------------------------------------------------------------------------
+    ## Total           2260331     621155    165817    286663     51851     38217   3424034
+    ## ====================================================================================
+    ## 
+    ## Statistics for All Table Factors
+    ## 
+    ## Pearson's Chi-squared test 
+    ## ------------------------------------------------------------
+    ## Chi^2 = 110479.2      d.f. = 15      p <0.0000000000000002 
+    ## 
+    ##         Minimum expected frequency: 8507.127
+
+``` r
+weighted_chisqtest(maxgrip_cat ~ hc002_mod_cat + cciw_w7, SHARE_out.SE)
+```
+
+    ## 
+    ## # Measure of Association for Contingency Tables
+    ## 
+    ##    Chi-squared: 110479.2394
+    ##     Cramer's V: 0.1037
+    ##             df: 15
+    ##        p-value: < .001***
+    ##   Observations: 3.42403e+06
+
+## Results of multivariate regression analysis
+
+- Multivariate linear regression was chosen to examine the factors that
+  influence handshake strength.
+
+- Three models for Poland, Sweden and Slovakia were built separately to
+  compare how each factor affects the dependent variable in each
+  country.
+
+- Control variables, in addition to the number of medical visits, were
+  chosen for their possible effect on handshake strength among people
+  aged 50+.
+
+- The number of observations for countries varies, and some observations
+  were removed due to missing data.
+
+- The control variable corresponding to occupational status was
+  aggregated to a binary variable qualifying respondents as retired or
+  having other occupational status.
+
+- In addition, observations in which the marital status variable was a
+  missing data were not included in the analysis so as not to distort
+  the interpretation of the model.
+
+- The F-test statistic shows that all three models are statistically
+  significant (p-value\<0.00). Although, it is worth noting that the
+  variation in handshake strength is best explained by the model for
+  Sweden (the fitted coefficient of determination is 68%). For Poland,
+  the model explains the variation in handshake strength by only 64%,
+  and for Slovakia by 56%.
+
+- The number of medical consultations turned out to be a statistically
+  significant variable (p-value = 0.019) only for Poland and Sweden, in
+  both cases this variable has a negative effect, meaning that
+  increasing the number of visits to the doctor per year by one has a
+  negative effect on well-being as measured by handshake strength with
+  all other conditions unchanged. The results of the three regressions
+  show that there are other important determinants of good health in the
+  elderly.
+
+- In all the countries studied, men had higher average handshake
+  strength and as age increased, individuals showed weaker handshake
+  strength, which is also not surprising. The motor ability variable
+  indicates difficulty in performing everyday activities (e.g., walking
+  up stairs, taking a shower) and as the level of difficulty increases,
+  average handshake strength decreases for each of the three countries.
+
+- Only in the case of Poland did the number of years spent in the
+  education system turn out to be a statistically significant variable:
+  with each additional year of education, the average handshake strength
+  of a Polish resident increases by 0.8 measurement units with all other
+  conditions unchanged
+
+- The variables material situation, self-esteem and marital status were
+  included in the model as variables aggregated to binary variables
+  (dummies) to avoid collinearity. The reference point for the material
+  situation variable is the evaluation of this situation as bad. This
+  variable is statistically significant for the Polish and Slovak
+  models. It shows that the average handshake strength for those who
+  rate their material situation as very moderate, average or good is
+  higher compared to those who rate their situation as bad. In the case
+  of Slovakia, this variable had larger coefficients which means a
+  greater impact of moderate, medium and good material situation versus
+  bad on well-being in people 50
+
+- The benchmark for self-assessment of health is respondents’ rating of
+  health as excellent. In people who rate their health as either very
+  good or good in Sweden, handshake strength is on average lower than in
+  people who rate their health as excellent with all other conditions
+  unchanged, and in Slovakia the situation is reversed. In all three
+  countries studied, in people who rate their health as average, on
+  average handshake strength is lower than in people who rate their
+  health as excellent. For those with a bad health rating, this variable
+  is significant only for Poland and Sweden, and maintains a negative
+  trend: their average handshake strength is lower than for those who
+  rate their health as excellent.
+
+- For the marital status variable, the benchmark is the respondent’s
+  marital status of married, living together with their spouse. In
+  Slovakia, people in a cohabiting relationship have on average better
+  well-being than married people living together with their spouse with
+  all other conditions unchanged. In the Polish and Swedish models,
+  never-married people have, on average, weaker handshake strength than
+  married people living together.
+
+- Also included in the model was the interaction variable age\*gender,
+  which is statistically significant for each country’s model, i.e. for
+  women,each additional year of age increases average handshake
+  strength, i.e. inhibits the negative effect of being female on the
+  value of the dependent variable.
+
+``` r
+# Results of multivariate regression analysis 
+
+# Clean control variable
+SHARE_out$age[SHARE_out$age < 0] <- NA
+SHARE_out$mar_stat[SHARE_out$mar_stat < 0] <- NA
+SHARE_out$maxgrip[SHARE_out$maxgrip < 0] <- NA
+SHARE_out$eduyears_mod[SHARE_out$eduyears_mod < 0] <- NA
+SHARE_out$grossmotor[SHARE_out$grossmotor < 0] <- NA
+SHARE_out$co007_[SHARE_out$co007_ < 0] <- NA
+SHARE_out$hc002_mod[SHARE_out$hc002_mod < 0] <- NA
+SHARE_out$sphus[SHARE_out$sphus < 0] <- NA
+
+#Make categorical variable as factor 
+SHARE_out$female <- as.factor(SHARE_out$female)
+SHARE_out$mar_stat <- as.factor(SHARE_out$mar_stat)
+SHARE_out$co007_ <- as.factor(SHARE_out$co007_)
+SHARE_out$sphus <- as.factor(SHARE_out$sphus)
+
+#Recoding
+SHARE_out$mar_stat_cat <- recode(SHARE_out$mar_stat, "1=1; 2=2; 3=3; 4=4; 5=5;6=6; else=NA")
+SHARE_out$Retired <- recode(SHARE_out$ep005_, "c(2, 3, 4, 5, 97)=0; 1=1; else=NA")
+
+
+## Variables: 
+#female
+#age 
+#Retired
+#hc002_mod
+#grossmotor
+#mar_star
+#co007_
+#eduyears_mod
+
+
+## Poland
+SHARE_out.PL <- dplyr::filter(SHARE_out,
+                            country.lab=="Poland" )
+
+
+lm.PL <- lm(maxgrip ~ female*age+Retired+hc002_mod+grossmotor+mar_stat_cat+co007_+eduyears_mod+sphus,
+           data = SHARE_out.PL,
+           na.action = na.exclude)
+
+#summary(lm.PL)
+
+
+## Sweden
+
+SHARE_out.SE <- dplyr::filter(SHARE_out,
+                              country.lab=="Sweden" )
+lm.SE<- lm(maxgrip ~ female*age+Retired +hc002_mod+grossmotor+mar_stat_cat+co007_+eduyears_mod+sphus,
+          data = SHARE_out.SE,
+          na.action = na.exclude)
+#summary(lm.SE)
+
+## Slovakia
+
+SHARE_out.SK <- dplyr::filter(SHARE_out,
+                              country.lab=="Slovakia" )
+lm.SK<- lm(maxgrip ~ female*age+Retired+hc002_mod+grossmotor+mar_stat_cat+co007_+eduyears_mod+sphus,
+           data = SHARE_out.SK,
+           na.action = na.exclude)
+#summary(lm.SK)
+
+
+
+# Results combined 
+stargazer(lm.PL, lm.SE, lm.SK, type = "text", title = "Results of linear regression analysis", 
+          digits = 2, 
+          column.labels = c("Poland", "Sweden", "Slovakia"), 
+          dep.var.labels=c("Handshake power"),
+          covariate.labels=c("Gender (female)", "Age", "Retired", "Visits to doctor", "Motor ability",
+                             "Marital status: in a relationship", 'Marital status: married, living apart', 'Marital status: never married', 
+                             'Marital status: divorced', 'Marital status: widower', 'Material situation: moderate', 
+                             'Material situation: moderate', 'Material situation: good',
+                             "Years of education", "Self-assessment of health: very good", "Self-assessment of health: good",
+                             "Self-assessment of health: average", "Self-assessment of health: bad", "Women*Age", "Fixed term"), 
+          out='table.txt', align=TRUE,no.space=TRUE)
+```
+
+    ## 
+    ## Results of linear regression analysis
+    ## ==================================================================================================================
+    ##                                                                   Dependent variable:                             
+    ##                                       ----------------------------------------------------------------------------
+    ##                                                                     Handshake power                               
+    ##                                                Poland                    Sweden                   Slovakia        
+    ##                                                  (1)                       (2)                      (3)           
+    ## ------------------------------------------------------------------------------------------------------------------
+    ## Gender (female)                               -30.73***                 -35.86***                -26.18***        
+    ##                                                (1.57)                    (2.14)                    (3.34)         
+    ## Age                                           -0.49***                  -0.59***                  -0.38***        
+    ##                                                (0.02)                    (0.03)                    (0.05)         
+    ## Retired                                        0.89***                    0.38                     -0.67          
+    ##                                                (0.30)                    (0.37)                    (0.62)         
+    ## Visits to doctor                               -0.06**                   -0.08**                   -0.06          
+    ##                                                (0.02)                    (0.03)                    (0.06)         
+    ## Motor ability                                 -1.51***                  -1.51***                  -3.01***        
+    ##                                                (0.17)                    (0.27)                    (0.54)         
+    ## Marital status: in a relationship                                         -0.30                    3.22*          
+    ##                                                                          (0.67)                    (1.78)         
+    ## Marital status: married, living apart           0.59                      -1.79                    -2.51          
+    ##                                                (1.01)                    (2.12)                    (1.74)         
+    ## Marital status: never married                 -1.87***                  -1.55***                    0.93          
+    ##                                                (0.57)                    (0.50)                    (0.96)         
+    ## Marital status: divorced                        -0.46                     -0.01                     1.00          
+    ##                                                (0.56)                    (0.41)                    (0.95)         
+    ## Marital status: widower                         0.43                      -0.29                     0.40          
+    ##                                                (0.33)                    (0.43)                    (0.74)         
+    ## Material situation: moderate                   0.81**                     0.18                     1.48*          
+    ##                                                (0.34)                    (1.00)                    (0.89)         
+    ## Material situation: moderate                   1.20***                    0.54                    3.26***         
+    ##                                                (0.36)                    (0.95)                    (0.90)         
+    ## Material situation: good                       1.79***                    0.68                    3.67***         
+    ##                                                (0.44)                    (0.94)                    (0.97)         
+    ## Years of education                             0.08**                     -0.03                     0.03          
+    ##                                                (0.04)                    (0.03)                    (0.07)         
+    ## Self-assessment of health: very good            0.47                     -0.74*                    1.16*          
+    ##                                                (0.90)                    (0.44)                    (0.68)         
+    ## Self-assessment of health: good                 -1.20                   -1.25***                   1.47**         
+    ##                                                (0.83)                    (0.40)                    (0.68)         
+    ## Self-assessment of health: average            -2.41***                  -2.08***                   -1.75*         
+    ##                                                (0.85)                    (0.46)                    (0.94)         
+    ## Self-assessment of health: bad                -4.00***                  -3.07***                    0.33          
+    ##                                                (0.89)                    (0.71)                    (1.58)         
+    ## Women*Age                                      0.22***                   0.27***                  0.18***         
+    ##                                                (0.02)                    (0.03)                    (0.05)         
+    ## Fixed term                                    74.74***                  86.39***                  62.35***        
+    ##                                                (1.68)                    (2.03)                    (3.23)         
+    ## ------------------------------------------------------------------------------------------------------------------
+    ## Observations                                    4,050                     2,654                    1,469          
+    ## R2                                              0.64                      0.69                      0.56          
+    ## Adjusted R2                                     0.64                      0.68                      0.56          
+    ## Residual Std. Error                       6.88 (df = 4031)          6.33 (df = 2634)          7.84 (df = 1449)    
+    ## F Statistic                           397.37*** (df = 18; 4031) 302.81*** (df = 19; 2634) 97.58*** (df = 19; 1449)
+    ## ==================================================================================================================
+    ## Note:                                                                                  *p<0.1; **p<0.05; ***p<0.01
+
+``` r
+#Marital status reference point: married, living together. 
+#Reference point for material situation: bad.
+#Reference point for self-assessed health situation: excellent. 
+```
+
+## Summary
+
+- A number of statistical tests conducted confirm that Poland, Sweden
+  and Slovakia differ significantly among themselves in terms of average
+  health grip strength, identifying well-being status, and in terms of
+  average annual number of medical consultations.
+
+- Additionally, in each country studied, these variables were found to
+  be statistically dependent among themselves. Factors influencing
+  well-being were determined using econometric modeling.
+
+- First of all, the effect of the average number of visits to the doctor
+  on handshake strength was examined. For respondents from Poland and
+  Sweden, it turned out that an increase in the number of annual visits
+  is associated with a decrease in the level of well-being with all
+  other factors unchanged.
+
+- This gives grounds to conclude that the health status of the elderly
+  does not depend only on the average number of medical consultations.
+  There are other statistically significant factors affecting the
+  handshake strength of people aged 50+ with different strength and
+  effect in Poland, Sweden and Slovakia: age, gender, marital status,
+  number of summers spent in education, motor ability, material
+  situation.
+
+- In addition, this study underscores the existence of numerous
+  unnecessary medical consultations, which are not only a financial
+  burden for EU countries, but also create a problem of unavailability
+  of doctors in critical situations for those in urgent need of medical
+  intervention. The topic discussed needs further exploration and more
+  thorough analysis, as it affects the level of quality of medical
+  services in the country
